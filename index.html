@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bober Blast</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --grid-bg: #1e293b;
+            --cell: #334155;
+            --size: 45px;
+            --accent: #4ade80;
+            --record: #fbbf24;
+        }
+
+        body {
+            background: var(--bg);
+            color: white;
+            font-family: 'Arial Black', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+        }
+
+        /* МЕНЮ */
+        .menu {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            text-align: center;
+        }
+
+        .btn {
+            background: var(--accent);
+            color: #064e3b;
+            border: none;
+            padding: 20px 60px;
+            font-size: 24px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            box-shadow: 0 10px 0 #166534;
+            margin-top: 20px;
+        }
+
+        .btn:active {
+            transform: translateY(5px);
+            box-shadow: 0 5px 0 #166534;
+        }
+
+        .record-text {
+            color: var(--record);
+            font-size: 20px;
+            margin-top: 10px;
+        }
+
+        /* ГРА */
+        #ui { display: none; text-align: center; }
+        .score-box { margin-bottom: 10px; }
+        #score { font-size: 48px; line-height: 1; }
+        #best-label { color: var(--record); font-size: 18px; }
+
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(8, var(--size));
+            grid-template-rows: repeat(8, var(--size));
+            gap: 4px;
+            background: #000;
+            padding: 8px;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .cell {
+            width: var(--size);
+            height: var(--size);
+            background: var(--cell);
+            border-radius: 4px;
+        }
+
+        .cell.filled { box-shadow: inset 0 0 10px rgba(0,0,0,0.4); }
+        .cell.preview { background: rgba(255,255,255,0.2) !important; }
+
+        #tray {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+            height: 120px;
+            justify-content: center;
+        }
+
+        .piece { display: grid; gap: 2px; transform: scale(0.6); cursor: grab; }
+        .p-cell { width: var(--size); height: var(--size); border-radius: 4px; }
+
+        /* Кольори блоків */
+        .c1 { background: #ff4444; } .c2 { background: #44ff44; }
+        .c3 { background: #4444ff; } .c4 { background: #ffcc00; }
+        .c5 { background: #ff00ff; }
+
+        #drag-el {
+            position: fixed;
+            pointer-events: none;
+            display: none;
+            z-index: 1000;
+            transform: translateY(-90px);
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    
+    <div id="start-menu" class="menu">
+        <h1 style="color: var(--accent); font-size: 50px; margin: 0;">BOBR BLAST</h1>
+        <div id="menu-best" class="record-text">record: 0</div>
+        <button class="btn" onclick="initGame()">play</button>
+    </div>
+
+    
+    <div id="over-menu" class="menu hidden">
+        <h1 style="color: #ff4444; margin: 0;">КУРВА bober</h1>
+        <p id="final-score" style="font-size: 28px; margin: 10px 0;"></p>
+        <div id="over-best" class="record-text">РЕКОРД: 0</div>
+        <button class="btn" onclick="initGame()">blaaaa</button>
+    </div>
+
+    <div id="ui">
+        <div class="score-box">
+            <div id="best-label">BEST: <span id="best-score">0</span></div>
+            <div id="score">0</div>
+        </div>
+        <div id="grid"></div>
+        <div id="tray"></div>
+    </div>
+
+    <div id="drag-el"></div>
+
+    <script>
+        const GRID_SIZE = 8;
+        const gridEl = document.getElementById('grid');
+        const trayEl = document.getElementById('tray');
+        const scoreEl = document.getElementById('score');
+        const bestEl = document.getElementById('best-score');
+        const dragEl = document.getElementById('drag-el');
+
+        const sndPlace = new Audio('https://www.myinstants.com/media/sounds/pkh-19969.mp3');
+        const sndClear = new Audio('https://www.myinstants.com/media/sounds/bobior-kurva-8212.mp3');
+
+        let grid = [];
+        let score = 0;
+        let record = localStorage.getItem('bobr_record') || 0;
+        let activePiece = null;
+        let pieces = [];
+
+        
+        document.getElementById('menu-best').innerText = "record: " + record;
+
+        const SHAPES = [
+            { s: [[1,1],[1,1]], c: 'c1' }, { s: [[1,1,1,1]], c: 'c2' },
+            { s: [[1,1,1],[0,1,0]], c: 'c3' }, { s: [[1,1,0],[0,1,1]], c: 'c4' },
+            { s: [[1,1],[1,0],[1,0]], c: 'c5' }, { s: [[1]], c: 'c1' },
+            { s: [[1,1,1]], c: 'c2' }
+        ];
+
+        function initGame() {
+            sndPlace.play().then(() => { sndPlace.pause(); sndPlace.currentTime = 0; });
+            sndClear.play().then(() => { sndClear.pause(); sndClear.currentTime = 0; });
+
+            document.getElementById('start-menu').classList.add('hidden');
+            document.getElementById('over-menu').classList.add('hidden');
+            document.getElementById('ui').style.display = 'block';
+
+            score = 0;
+            record = localStorage.getItem('bobr_record') || 0;
+            scoreEl.innerText = score;
+            bestEl.innerText = record;
+
+            createGrid();
+            spawnPieces();
+        }
+
+        function createGrid() {
+            gridEl.innerHTML = '';
+            grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+            for (let r = 0; r < GRID_SIZE; r++) {
+                for (let c = 0; c < GRID_SIZE; c++) {
+                    const div = document.createElement('div');
+                    div.className = 'cell';
+                    div.id = `c-${r}-${c}`;
+                    gridEl.appendChild(div);
+                }
+            }
+        }
+
+        function createPieceMarkup(piece) {
+            const el = document.createElement('div');
+            el.className = 'piece';
+            el.style.gridTemplateColumns = `repeat(${piece.s[0].length}, var(--size))`;
+            piece.s.flat().forEach(val => {
+                const c = document.createElement('div');
+                c.className = val ? `p-cell ${piece.c}` : 'p-cell';
+                if (!val) c.style.visibility = 'hidden';
+                el.appendChild(c);
+            });
+            return el;
+        }
+
+        function spawnPieces() {
+            trayEl.innerHTML = '';
+            pieces = [null, null, null];
+            for (let i = 0; i < 3; i++) {
+                const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+                pieces[i] = { ...shape, id: i };
+                const pEl = createPieceMarkup(pieces[i]);
+                pEl.onmousedown = (e) => startDrag(e, pieces[i], i);
+                pEl.ontouchstart = (e) => startDrag(e, pieces[i], i);
+                trayEl.appendChild(pEl);
+            }
+        }
+
+        function startDrag(e, piece, idx) {
+            activePiece = { piece, idx };
+            const ev = e.touches ? e.touches[0] : e;
+            dragEl.innerHTML = '';
+            const clone = createPieceMarkup(piece);
+            clone.style.transform = 'scale(1)';
+            dragEl.appendChild(clone);
+            dragEl.style.display = 'grid';
+            
+            const move = (me) => {
+                if (me.cancelable) me.preventDefault();
+                const mev = me.touches ? me.touches[0] : me;
+                dragEl.style.left = `${mev.clientX - (piece.s[0].length * 22)}px`;
+                dragEl.style.top = `${mev.clientY - 20}px`;
+                
+                document.querySelectorAll('.cell').forEach(c => c.classList.remove('preview'));
+                const pos = getGridPos(mev);
+                if (pos && canPlace(piece.s, pos.r, pos.c)) {
+                    showPreview(piece.s, pos.r, pos.c);
+                }
+            };
+
+            const end = (ee) => {
+                const eev = ee.changedTouches ? ee.changedTouches[0] : ee;
+                const pos = getGridPos(eev);
+                if (pos && canPlace(piece.s, pos.r, pos.c)) {
+                    place(piece, pos.r, pos.c);
+                    trayEl.children[idx].style.visibility = 'hidden';
+                    pieces[idx] = null;
+                    
+                    sndPlace.currentTime = 0;
+                    sndPlace.play();
+
+                    checkLines();
+                    if (pieces.every(p => p === null)) spawnPieces();
+                    setTimeout(checkGameOver, 200);
+                }
+                dragEl.style.display = 'none';
+                document.querySelectorAll('.cell').forEach(c => c.classList.remove('preview'));
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', end);
+                document.removeEventListener('touchmove', move);
+                document.removeEventListener('touchend', end);
+            };
+
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', end);
+            document.addEventListener('touchmove', move, {passive: false});
+            document.addEventListener('touchend', end);
+        }
+
+        function getGridPos(e) {
+            const rect = gridEl.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top - 90;
+            const c = Math.floor(x / (rect.width / GRID_SIZE));
+            const r = Math.floor(y / (rect.height / GRID_SIZE));
+            return (r>=0 && r<GRID_SIZE && c>=0 && c<GRID_SIZE) ? {r,c} : null;
+        }
+
+        function canPlace(shape, r, c) {
+            for(let i=0; i<shape.length; i++) {
+                for(let j=0; j<shape[i].length; j++) {
+                    if (shape[i][j]) {
+                        if (r+i >= GRID_SIZE || c+j >= GRID_SIZE || grid[r+i][c+j]) return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function showPreview(shape, r, c) {
+            shape.forEach((row, i) => row.forEach((v, j) => {
+                if(v) document.getElementById(`c-${r+i}-${c+j}`).classList.add('preview');
+            }));
+        }
+
+        function place(piece, r, c) {
+            piece.s.forEach((row, i) => row.forEach((v, j) => {
+                if(v) grid[r+i][c+j] = piece.c;
+            }));
+            score += 10;
+            updateScoreUI();
+            draw();
+        }
+
+        function updateScoreUI() {
+            scoreEl.innerText = score;
+            if (score > record) {
+                record = score;
+                localStorage.setItem('bobr_record', record);
+                bestEl.innerText = record;
+            }
+        }
+
+        function checkLines() {
+            let rs = [], cs = [];
+            for(let r=0; r<GRID_SIZE; r++) if(grid[r].every(v => v!==0)) rs.push(r);
+            for(let c=0; c<GRID_SIZE; c++) {
+                let full = true;
+                for(let r=0; r<GRID_SIZE; r++) if(!grid[r][c]) full = false;
+                if(full) cs.push(c);
+            }
+            if(rs.length > 0 || cs.length > 0) {
+                rs.forEach(r => grid[r].fill(0));
+                cs.forEach(c => { for(let r=0; r<GRID_SIZE; r++) grid[r][c]=0; });
+                score += (rs.length + cs.length) * 100;
+                
+                sndClear.currentTime = 0;
+                sndClear.play();
+                
+                updateScoreUI();
+                setTimeout(draw, 100);
+            }
+        }
+
+        function draw() {
+            for(let r=0; r<GRID_SIZE; r++) {
+                for(let c=0; c<GRID_SIZE; c++) {
+                    const el = document.getElementById(`c-${r}-${c}`);
+                    el.className = 'cell' + (grid[r][c] ? ` filled ${grid[r][c]}` : '');
+                }
+            }
+        }
+
+        function checkGameOver() {
+            const left = pieces.filter(p => p !== null);
+            if (left.length === 0) return;
+
+            let can = false;
+            left.forEach(p => {
+                for(let r=0; r<GRID_SIZE; r++) {
+                    for(let c=0; c<GRID_SIZE; c++) {
+                        if(canPlace(p.s, r, c)) can = true;
+                    }
+                }
+            });
+            if(!can) {
+                document.getElementById('final-score').innerText = "score: " + score;
+                document.getElementById('over-best').innerText = "record: " + record;
+                document.getElementById('over-menu').classList.remove('hidden');
+                document.getElementById('menu-best').innerText = "record: " + record;
+            }
+        }
+    </script>
+</body>
+</html>
